@@ -1,0 +1,11 @@
+/* Shrink the unused spare slot to make room */
+&slot1_partition {
+	reg = <0x000C4000 0x00098000>;
+	label = "image-1";
+};
+
+/* 128 KB of storage for your files */
+&storage_partition {
+	reg = <0x0015c000 DT_SIZE_K(128)>;
+	label = "storage";
+};

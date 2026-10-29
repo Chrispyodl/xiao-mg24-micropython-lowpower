@@ -1,0 +1,134 @@
+diff --git a/ports/zephyr/modmachine.c b/ports/zephyr/modmachine.c
+index 89ad12f18..e9fbcfdae 100644
+--- a/ports/zephyr/modmachine.c
++++ b/ports/zephyr/modmachine.c
+@@ -31,6 +31,14 @@
+ 
+ #include <stdio.h>
+ #include <zephyr/sys/reboot.h>
++#include <zephyr/pm/pm.h>
++#include <zephyr/pm/device.h>
++#include <zephyr/pm/policy.h>
++#include <zephyr/drivers/uart.h>
++#include <em_device.h>
++#include <em_emu.h>
++#include <em_burtc.h>
++#include <zephyr/sys/poweroff.h>
+ 
+ #include "modmachine.h"
+ 
+@@ -62,3 +70,88 @@ MP_DEFINE_CONST_FUN_OBJ_0(machine_reset_cause_obj, machine_reset_cause);
+ static void mp_machine_idle(void) {
+     k_yield();
+ }
++
++#ifdef CONFIG_PM_DEVICE
++static void mp_machine_lightsleep(size_t n_args, const mp_obj_t *args) {
++    if (n_args == 0) {
++        mp_raise_ValueError(MP_ERROR_TEXT("value must be provided"));
++    }
++    mp_int_t milliseconds = mp_obj_get_int(args[0]);
++    const struct device *console = DEVICE_DT_GET(DT_CHOSEN(zephyr_console));
++
++    // The console's RX interrupt holds a PM lock that blocks EM2,
++    // so stop listening while asleep. The console itself is not
++    // suspended: that re-applies its pin setup, which re-enables PA8.
++    uart_irq_rx_disable(console);
++    k_sleep(K_MSEC(5));                      // let any last output finish sending
++
++    k_sleep(K_MSEC(milliseconds));
++
++    uart_irq_rx_enable(console);
++}
++#else
++static void mp_machine_lightsleep(size_t n_args, const mp_obj_t *args) {
++    mp_raise_ValueError(MP_ERROR_TEXT("not implemented"));
++}
++#endif
++
++// deepsleep(ms): enter EM4, waking after ms milliseconds via the BURTC.
++// RAM is lost: waking is like a reset, and main.py runs again.
++// deepsleep() with no argument sleeps until reset (or power is cycled).
++static void mp_machine_deepsleep(size_t n_args, const mp_obj_t *args) {
++    mp_int_t ms = 0;
++    if (n_args > 0) {
++        ms = mp_obj_get_int(args[0]);
++    }
++
++    // Quieten the console and let any last output leave
++    const struct device *console = DEVICE_DT_GET(DT_CHOSEN(zephyr_console));
++    uart_irq_rx_disable(console);
++    k_busy_wait(5000);
++
++    // From here on, nothing should interrupt us
++    (void)irq_lock();
++
++    if (ms > 0) {
++        // BURTC clock: the ultra-low-frequency RC oscillator (1 kHz, 1 count = 1 ms).
++        // It keeps running in EM4.
++        CMU->EM4GRPACLKCTRL = CMU_EM4GRPACLKCTRL_CLKSEL_ULFRCO;
++        CMU->CLKEN0_SET = CMU_CLKEN0_BURTC;
++
++        BURTC_Init_TypeDef burtc = BURTC_INIT_DEFAULT;
++        burtc.start = false;
++        burtc.compare0Top = true;     // count up to the compare value
++        burtc.em4comp = true;         // a compare match wakes the chip from EM4
++        burtc.em4overflow = false;
++        BURTC_Init(&burtc);
++
++        BURTC_CounterReset();
++        BURTC_CompareSet(0, (uint32_t)ms);
++        BURTC_IntClear(_BURTC_IF_MASK);
++        BURTC_IntEnable(BURTC_IEN_COMP);
++        BURTC_Start();
++    }
++
++    // Hold every pin exactly as it is while in EM4 (RF switch off, flash CS
++    // high, PA8 off...), and release them automatically on waking.
++    EMU_EM4Init_TypeDef em4 = EMU_EM4INIT_DEFAULT;
++    em4.pinRetentionMode = emuPinRetentionEm4Exit;
++    EMU_EM4Init(&em4);
++
++    EMU_EnterEM4();
++
++    // Should never get here, but if EM4 entry fails, reset cleanly
++    sys_reboot(SYS_REBOOT_COLD);
++}
++
++static mp_obj_t mp_machine_get_freq(void) {
++    mp_raise_ValueError(MP_ERROR_TEXT("not implemented"));
++}
++
++static void mp_machine_set_freq(size_t n_args, const mp_obj_t *args) {
++    mp_raise_ValueError(MP_ERROR_TEXT("not implemented"));
++}
++
++static mp_obj_t mp_machine_unique_id(void) {
++    mp_raise_ValueError(MP_ERROR_TEXT("not implemented"));
++}
+diff --git a/ports/zephyr/mpconfigport.h b/ports/zephyr/mpconfigport.h
+index 71d71fe4a..f16fbe8c7 100644
+--- a/ports/zephyr/mpconfigport.h
++++ b/ports/zephyr/mpconfigport.h
+@@ -74,6 +74,7 @@
+ #define MICROPY_PY_MICROPYTHON_MEM_INFO (1)
+ #define MICROPY_PY_MACHINE          (1)
+ #define MICROPY_PY_MACHINE_INCLUDEFILE "ports/zephyr/modmachine.c"
++#define MICROPY_PY_MACHINE_BARE_METAL_FUNCS (1)
+ #define MICROPY_PY_MACHINE_I2C      (1)
+ #define MICROPY_PY_MACHINE_I2C_TRANSFER_WRITE1 (1)
+ #ifdef CONFIG_I2C_TARGET
+diff --git a/ports/zephyr/prj.conf b/ports/zephyr/prj.conf
+index c13caa8fd..604f388dc 100644
+--- a/ports/zephyr/prj.conf
++++ b/ports/zephyr/prj.conf
+@@ -10,6 +10,9 @@ CONFIG_FPU=y
+ CONFIG_MAIN_STACK_SIZE=4736
+ CONFIG_POLL=y
+ 
++CONFIG_PM=y
++CONFIG_PM_DEVICE=y
++CONFIG_POWEROFF=y
+ CONFIG_DEVICE_DT_METADATA=y
+ 
+ # Enable sensor subsystem (doesn't add code if not used).
