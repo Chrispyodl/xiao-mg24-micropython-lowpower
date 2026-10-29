@@ -4,6 +4,13 @@ Custom MicroPython firmware for the **Seeed Studio XIAO MG24** (EFR32MG24B220F15
 
 **Author:** Chris Hughes ([@Chrispyodl](https://github.com/Chrispyodl))
 
+<p align="center">
+  <img src="images/xiao-mg24-deepsleep-1.5uA.jpg" width="700"
+       alt="An RS PRO RS-9963T multimeter on its µA range reading 001.5 µA, wired in series between a 3.7 V 500 mAh LiPo battery and a Seeed XIAO MG24 board">
+  <br>
+  <em>The XIAO MG24 in <code>machine.deepsleep()</code>, running from a 500 mAh LiPo: 1.5 µA for the whole board.</em>
+</p>
+
 | Mode | Function | Measured board current |
 |---|---|---|
 | Idle, stock firmware | `time.sleep()` | 13.1 mA |
