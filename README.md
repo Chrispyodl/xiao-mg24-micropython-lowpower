@@ -8,7 +8,7 @@ Custom MicroPython firmware for the **Seeed Studio XIAO MG24** (EFR32MG24B220F15
   <img src="images/xiao-mg24-deepsleep-1.5uA.jpg" width="700"
        alt="An RS PRO RS-9963T multimeter on its µA range reading 001.5 µA, wired in series between a 3.7 V 500 mAh LiPo battery and a Seeed XIAO MG24 board">
   <br>
-  <em>The XIAO MG24 in <code>machine.deepsleep()</code>, running from a 500 mAh LiPo: 1.5 µA for the whole board.</em>
+  <em>The XIAO MG24 in <code>machine.deepsleep()</code>, running from a 500 mAh LiPo. The whole board's current wanders between about 1.1 and 2.5 µA; this snapshot caught 1.5 µA.</em>
 </p>
 
 | Mode | Function | Measured board current |
@@ -40,28 +40,41 @@ All figures are whole-board currents measured on battery with USB unplugged, usi
 
 ## 1. Quick start: flash the prebuilt firmware
 
-Download `mpy-1.29.0-xiao_mg24-deepsleep.hex` from the [latest release](../../releases/latest).
+### Repository layout
+
+| Folder | Contents |
+|---|---|
+| [`firmware/`](firmware/) | `mpy-1.29.0-xiao_mg24-deepsleep.hex`: the prebuilt firmware (also attached to each [release](../../releases)) |
+| [`examples/`](examples/) | `low_power.py`, `main_lightsleep.py`, `main_deepsleep.py` |
+| [`config/`](config/) | `no-wdt.conf`, `fs.conf`, `pm-tweaks.conf`, `fs.overlay` |
+| [`patches/`](patches/) | `xiao-mg24-sleep.patch`: all C changes against MicroPython v1.29.0 |
+| [`images/`](images/) | Photos used in this README |
+
+### Flashing
 
 You need [pyOCD](https://pyocd.io/). The board's on-board SAMD11 acts as a CMSIS-DAP debug probe, so no extra hardware is required.
 
 ```bash
 pip install pyocd
 pyocd pack install EFR32MG24
-pyocd flash -t efr32mg24b220f1536im48 mpy-1.29.0-xiao_mg24-deepsleep.hex
+pyocd flash -t efr32mg24b220f1536im48 firmware/mpy-1.29.0-xiao_mg24-deepsleep.hex
 ```
 
 pyOCD may print errors about access ports **AP#2** and **AP#3**. These belong to the chip's locked Secure Vault and are expected; programming is unaffected.
 
-Then connect with Thonny (*MicroPython (generic)*) or `mpremote`, and copy [`examples/low_power.py`](examples/low_power.py) and one of the [example scripts](#6-example-scripts) to `/flash` as `main.py`.
+### Copying the Python files
 
-### Repository layout
+Connect with Thonny (*MicroPython (generic)*) or `mpremote`, and copy two files to `/flash`:
 
-| Folder | Contents |
-|---|---|
-| [`examples/`](examples/) | `low_power.py`, `main_lightsleep.py`, `main_deepsleep.py` |
-| [`config/`](config/) | `no-wdt.conf`, `fs.conf`, `pm-tweaks.conf`, `fs.overlay` |
-| [`patches/`](patches/) | `xiao-mg24-sleep.patch`: all C changes against MicroPython v1.29.0 |
-| [Releases](../../releases) | The prebuilt `.hex` firmware |
+- [`examples/low_power.py`](examples/low_power.py), keeping its name
+- one of the [example scripts](#6-example-scripts), **renamed to `main.py`** so it runs at boot
+
+```bash
+mpremote cp examples/low_power.py :low_power.py
+mpremote cp examples/main_lightsleep.py :main.py
+```
+
+To check the firmware:
 
 ```python
 >>> import sys; sys.implementation
@@ -136,6 +149,9 @@ flowchart LR
 ## 4. Firmware changes in detail
 
 All C changes are in `ports/zephyr/` and are supplied as a single patch against v1.29.0 (`patches/xiao-mg24-sleep.patch`).
+
+> [!NOTE]
+> The patch calls Silicon Labs' EMU and BURTC libraries directly, so it only builds for Silicon Labs Series 2 boards. It's intended for this board, not as a general change to the Zephyr port.
 
 ### 4.1 `prj.conf` (from PR #16864)
 
@@ -760,7 +776,7 @@ The filesystem, power management and the BURTC/EMU HAL cost about **10 KB of fla
 
 ## 9. How the power figures were found
 
-Each figure is the steady current between LED blinks, measured with a multimeter (RS-9963T, accuracy checked to within 1.2 % against a known resistor) in series with the battery, USB unplugged. Every step changed exactly one thing.
+Each figure is the steady current between LED blinks, measured with a multimeter (RS-9963T, accuracy checked to within 1.2 % against a known resistor) in series with the battery, USB unplugged. Each step changed one thing, or one closely related group of pins, so its effect could be measured on its own.
 
 | Stage | Change | Sleep current |
 |---|---|---|
